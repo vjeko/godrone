@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/felixge/godrone"
+	"godrone"
 	"github.com/gorilla/websocket"
 )
 

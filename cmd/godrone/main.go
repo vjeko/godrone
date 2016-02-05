@@ -1,6 +1,7 @@
 package main
 
 import (
+  "os"
 	"flag"
 	"log"
 	"math"
@@ -19,6 +20,14 @@ const pitchLimit = 30 // degrees
 const rollLimit = 30  // degrees
 
 func main() {
+  f, err := os.OpenFile("/var/log/firmware", os.O_CREATE | os.O_RDWR, 0666)
+  if err != nil {
+    panic(err)
+  }
+  defer f.Close()
+  log.SetOutput(f)
+
+
 	cutoutReason := "not calibrated"
 	flag.Parse()
 
@@ -68,6 +77,7 @@ func main() {
 		}
 	}
 	calibrate()
+  println("Success.")
 	log.Print("Up, up and away!")
 
 	// This is the main control loop.

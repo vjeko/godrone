@@ -1,6 +1,7 @@
 package godrone
 
 import (
+	"log"
 	"fmt"
 	"io"
 	"strings"
@@ -116,6 +117,7 @@ func (f *Firmware) Control() error {
 		return err
 	}
 	f.Motors = f.Controller.Control(f.Actual, f.Desired, dt)
+  log.Printf("Motors set to: %s\n", f.Motors)
 	if err := f.Motorboard.WriteSpeeds(f.Motors); err != nil {
 		return fmt.Errorf("Failed to write speeds: %s", err)
 	}

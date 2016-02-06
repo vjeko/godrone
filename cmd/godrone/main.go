@@ -1,15 +1,17 @@
 package main
 
 import (
-  "os"
+	"encoding/gob"
 	"flag"
 	"log"
 	"math"
+	"net"
 	"net/http"
+	"os"
 	"time"
 
-	"godrone"
 	"github.com/gorilla/websocket"
+	"godrone"
 )
 
 var verbose = flag.Int("verbose", 0, "verbosity: 1=some 2=lots")
@@ -20,13 +22,12 @@ const pitchLimit = 30 // degrees
 const rollLimit = 30  // degrees
 
 func main() {
-  f, err := os.OpenFile("/var/log/firmware", os.O_CREATE | os.O_RDWR, 0666)
-  if err != nil {
-    panic(err)
-  }
-  defer f.Close()
-  log.SetOutput(f)
-
+	f, err := os.OpenFile("/var/log/firmware", os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	log.SetOutput(f)
 
 	cutoutReason := "not calibrated"
 	flag.Parse()
@@ -50,13 +51,14 @@ func main() {
 	// It is the only way to send and receive info the the
 	// godrone.Firmware object (which is non-concurrent).
 	reqCh := make(chan Request)
+	motorCh := make(chan [4]float64)
 
 	// Autonomy/guard goroutines.
-	go monitorAngles(reqCh)
-	go lander(reqCh)
+	//go monitorAngles(reqCh)
+	//go lander(reqCh)
 
 	// The websocket input goroutine.
-	go serveHttp(reqCh)
+	//go serveHttp(reqCh)
 
 	calibrate := func() {
 		for {
@@ -77,8 +79,11 @@ func main() {
 		}
 	}
 	calibrate()
-  println("Success.")
+	println("Success.")
 	log.Print("Up, up and away!")
+
+	go ctrl(motorCh, firmware)
+	go handleExternal(motorCh, firmware)
 
 	// This is the main control loop.
 	flying := false
@@ -351,6 +356,51 @@ func lander(reqCh chan<- Request) {
 			default:
 				// Do not block on chan read.
 			}
+		}
+	}
+}
+
+func handleRequest(conn net.Conn,
+	c chan [4]float64,
+	firmware *godrone.Firmware) {
+	dec := gob.NewDecoder(conn)
+	motors := &godrone.MotorPWM{}
+	dec.Decode(motors)
+	log.Printf("Received : %+v", motors)
+	c <- motors.Motor
+}
+
+func handleExternal(
+	c chan [4]float64,
+	firmware *godrone.Firmware) {
+
+	ln, err := net.Listen("tcp", ":666")
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println("Started the external link.")
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			continue
+		}
+
+		handleRequest(conn, c, firmware)
+	}
+}
+
+func ctrl(c chan [4]float64, firmware *godrone.Firmware) {
+	vals := [4]float64{0.01, 0.0, 0.0, 0.0}
+
+	for {
+		select {
+		case vals = <-c:
+		default:
+		}
+		if err := firmware.Motorboard.WriteSpeeds(vals); err != nil {
+			log.Printf("Failed to write speeds: %s", err)
 		}
 	}
 }

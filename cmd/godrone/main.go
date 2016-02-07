@@ -9,7 +9,8 @@ import (
 	"net/http"
 	"os"
 	"time"
-
+  
+  "github.com/oleiade/lane"
 	"github.com/gorilla/websocket"
 	"godrone"
 )
@@ -82,8 +83,14 @@ func main() {
 	println("Success.")
 	log.Print("Up, up and away!")
 
-	go ctrl(motorCh, firmware)
+  var queue *lane.Queue = lane.NewQueue()
+  queue.Enqueue([4]float64{0.1, 0.1, 0.1, 0.1})
+  queue.Enqueue([4]float64{0.2, 0.2, 0.2, 0.2})
+
+	go ctrl(motorCh, firmware, queue)
 	go handleExternal(motorCh, firmware)
+
+  //go rotate(queue, motorCh)
 
 	// This is the main control loop.
 	flying := false
@@ -391,16 +398,39 @@ func handleExternal(
 	}
 }
 
-func ctrl(c chan [4]float64, firmware *godrone.Firmware) {
-	vals := [4]float64{0.01, 0.0, 0.0, 0.0}
+func ctrl(c chan [4]float64, firmware *godrone.Firmware, q *lane.Queue) {
+	//vals := [4]float64{0.002, 0.0, 0.0, 0.0}
 
 	for {
-		select {
-		case vals = <-c:
-		default:
-		}
-		if err := firmware.Motorboard.WriteSpeeds(vals); err != nil {
-			log.Printf("Failed to write speeds: %s", err)
-		}
+		//select {
+		//case vals = <-c:
+		//default:
+		//}
+	//}
+      time.Sleep(time.Millisecond * 30)
+      v := q.Head()
+      switch v := v.(type) {
+        case [4]float64:
+          q.Dequeue()
+		      if err := firmware.Motorboard.WriteSpeeds(v); err != nil {
+			      log.Printf("Failed to write speeds: %s", err)
+		      }
+          q.Enqueue(v)
+        }
 	}
+}
+
+func rotate(q *lane.Queue, c chan [4]float64) {
+  for {
+    select {
+    case <- time.After(time.Millisecond * 1):
+      v := q.Head()
+      switch v := v.(type) {
+        case [4]float64:
+          c <- v
+          q.Dequeue()
+          q.Enqueue(v)
+        }
+    }
+  }
 }

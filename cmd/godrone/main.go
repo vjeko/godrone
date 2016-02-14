@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"time"
-  
+
   "github.com/oleiade/lane"
 	"github.com/gorilla/websocket"
 	"godrone"
@@ -23,7 +23,7 @@ const pitchLimit = 30 // degrees
 const rollLimit = 30  // degrees
 
 func main() {
-	f, err := os.OpenFile("/var/log/firmware", os.O_CREATE|os.O_RDWR, 0666)
+	f, err := os.OpenFile("/var/log/firmware", os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0666)
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +51,7 @@ func main() {
 	// This is the channel to send requests to the main control loop.
 	// It is the only way to send and receive info the the
 	// godrone.Firmware object (which is non-concurrent).
-	reqCh := make(chan Request)
+	//reqCh := make(chan Request)
 	motorCh := make(chan [4]float64)
 
 	// Autonomy/guard goroutines.
@@ -83,16 +83,48 @@ func main() {
 	println("Success.")
 	log.Print("Up, up and away!")
 
-  var queue *lane.Queue = lane.NewQueue()
-  queue.Enqueue([4]float64{0.1, 0.1, 0.1, 0.1})
-  queue.Enqueue([4]float64{0.2, 0.2, 0.2, 0.2})
+  var q *lane.Queue = lane.NewQueue()
+  //q.Enqueue([4]float64{0.1, 0.1, 0.1, 0.1})
+  //q.Enqueue([4]float64{0.2, 0.2, 0.2, 0.2})
 
-	go ctrl(motorCh, firmware, queue)
+  q.Enqueue([4]float64{0.001, 0.001, 0.001, 0.001})
+
+	//go ctrl(motorCh, firmware, q)
+
 	go handleExternal(motorCh, firmware)
+
+	for {
+		select {
+    case motori := <-motorCh:
+      trimFactor := 10.0
+      for i := 0; i < len(motori); i++ {
+        motori[i] = motori[i]/trimFactor
+      }
+
+      if (motori[0] < 0.11) {
+        q.Enqueue(motori)
+        q.Dequeue()
+        log.Println(q.Head())
+      }
+		  default:
+		}
+
+      time.Sleep(time.Millisecond * 10)
+      v := q.Head()
+      switch v := v.(type) {
+        case [4]float64:
+		      if err := firmware.Motorboard.WriteSpeeds(v); err != nil {
+			      log.Printf("Failed to write speeds: %s", err)
+		      }
+      default:
+        log.Println("ERROR")
+        }
+	}
 
   //go rotate(queue, motorCh)
 
 	// This is the main control loop.
+  /*
 	flying := false
 	for {
 		select {
@@ -147,6 +179,7 @@ func main() {
 			log.Printf("%s", err)
 		}
 	}
+  */
 }
 
 type Request struct {
@@ -368,13 +401,20 @@ func lander(reqCh chan<- Request) {
 }
 
 func handleRequest(conn net.Conn,
-	c chan [4]float64,
-	firmware *godrone.Firmware) {
-	dec := gob.NewDecoder(conn)
-	motors := &godrone.MotorPWM{}
-	dec.Decode(motors)
-	log.Printf("Received : %+v", motors)
-	c <- motors.Motor
+	  c chan [4]float64,
+	  firmware *godrone.Firmware) {
+  
+  dec := gob.NewDecoder(conn)
+  for {
+  	motors := &godrone.MotorPWM{}
+    err := dec.Decode(motors)
+    if err != nil {
+      log.Println(err)
+      return
+    }
+	  log.Printf("Received : %v", motors)
+	  c <- motors.Motor
+  }
 }
 
 func handleExternal(
@@ -383,7 +423,7 @@ func handleExternal(
 
 	ln, err := net.Listen("tcp", ":666")
 	if err != nil {
-		log.Println(err)
+    log.Println("Error: ", err)
 		return
 	}
 	log.Println("Started the external link.")
@@ -402,35 +442,24 @@ func ctrl(c chan [4]float64, firmware *godrone.Firmware, q *lane.Queue) {
 	//vals := [4]float64{0.002, 0.0, 0.0, 0.0}
 
 	for {
-		//select {
-		//case vals = <-c:
-		//default:
-		//}
-	//}
-      time.Sleep(time.Millisecond * 30)
+		select {
+    case motori := <-c:
+        z := q.Head
+        q.Dequeue()
+        q.Enqueue(z)
+        //q.Enqueue(q.Head)
+        //q.Dequeue()
+        log.Println("\t\t", motori)
+		  default:
+		}
+
+      time.Sleep(time.Millisecond * 10)
       v := q.Head()
       switch v := v.(type) {
         case [4]float64:
-          q.Dequeue()
 		      if err := firmware.Motorboard.WriteSpeeds(v); err != nil {
 			      log.Printf("Failed to write speeds: %s", err)
 		      }
-          q.Enqueue(v)
         }
 	}
-}
-
-func rotate(q *lane.Queue, c chan [4]float64) {
-  for {
-    select {
-    case <- time.After(time.Millisecond * 1):
-      v := q.Head()
-      switch v := v.(type) {
-        case [4]float64:
-          c <- v
-          q.Dequeue()
-          q.Enqueue(v)
-        }
-    }
-  }
 }

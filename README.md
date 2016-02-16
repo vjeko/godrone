@@ -1,27 +1,16 @@
 # Cross-compile:
 
-http://dave.cheney.net/2015/08/22/cross-compilation-with-go-1-5
+Use the deployment script to compile and deploy the firmware.
 
-export GOPATH=/Users/vjeko/dev/gocode
-cd /Users/vjeko/dev/gocode/src
-git clone git@github.com:vjeko/godrone.git
-env GOOS=linux GOARCH=arm go build godrone/cmd/godrone
+# Internals
 
-ftp root@192.168.1.1
-put firmware
-
-telnet 192.168.1.1
-killall -9 program.elf.respawner.sh
-killall -9 program.elf
-cd /data/video/
-./firmware
-
-# godrone
-
-GoDrone is a firmware for the Parrot AR Drone 2.0. It is developed
-by Felix Geisendörfer and others using the Go programming language.
-
-There is no affiliation with Parrot and running this firmware
-may void your warranty.
-
-Please read the docs at: http://www.godrone.io/en/latest/
+The accelerometers and gyroscopes constitute a low-cost inertial
+measurement unit (IMU). The cost of this IMU is less
+than 10 USD. A Bosch BMA150 3-axis accelerometer using a
+10 bits A/D converter is used. It has a +/- 2g range. The two
+axis gyro is an Invensense IDG500. It is an analog sensor. It is
+digitalized by the PIC 12 bits A/D converter, and can measure
+rotation rates up to 500 degrees/s. On the vertical axis, a more
+accurate gyroscope is considered. It is an Epson XV3700. It
+has an auto-zero function to minimize heading drift. The IMU
+is running at a 200Hz rate.

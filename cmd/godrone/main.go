@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-  "github.com/oleiade/lane"
 	"github.com/gorilla/websocket"
+	"github.com/oleiade/lane"
 	"godrone"
 )
 
@@ -52,7 +52,7 @@ func main() {
 	// It is the only way to send and receive info the the
 	// godrone.Firmware object (which is non-concurrent).
 	//reqCh := make(chan Request)
-	motorCh := make(chan [4]float64)
+	motorCh := make(chan *godrone.MotorPWM)
 
 	// Autonomy/guard goroutines.
 	//go monitorAngles(reqCh)
@@ -83,103 +83,95 @@ func main() {
 	println("Success.")
 	log.Print("Up, up and away!")
 
-  var q *lane.Queue = lane.NewQueue()
-  //q.Enqueue([4]float64{0.1, 0.1, 0.1, 0.1})
-  //q.Enqueue([4]float64{0.2, 0.2, 0.2, 0.2})
-
-  q.Enqueue([4]float64{0.001, 0.001, 0.001, 0.001})
-
-	//go ctrl(motorCh, firmware, q)
+	var q *lane.Queue = lane.NewQueue()
+	q.Enqueue([4]float64{0.0, 0.0, 0.0, 0.0})
 
 	go handleExternal(motorCh, firmware)
 
 	for {
 		select {
-    case motori := <-motorCh:
-      trimFactor := 10.0
-      for i := 0; i < len(motori); i++ {
-        motori[i] = motori[i]/trimFactor
-      }
+		case packet := <-motorCh:
 
-      if (motori[0] < 0.11) {
-        q.Enqueue(motori)
-        q.Dequeue()
-        log.Println(q.Head())
-      }
-		  default:
-		}
-
-      time.Sleep(time.Millisecond * 10)
-      v := q.Head()
-      switch v := v.(type) {
-        case [4]float64:
-		      if err := firmware.Motorboard.WriteSpeeds(v); err != nil {
-			      log.Printf("Failed to write speeds: %s", err)
-		      }
-      default:
-        log.Println("ERROR")
-        }
-	}
-
-  //go rotate(queue, motorCh)
-
-	// This is the main control loop.
-  /*
-	flying := false
-	for {
-		select {
-		case req := <-reqCh:
-			var res Response
-			res.Cutout = cutoutReason
-			res.Actual = firmware.Actual
-			res.Desired = firmware.Desired
-			res.Time = time.Now()
-
-			if req.SetDesired != nil {
-				// Log changes to desired
-				if Verbose() && firmware.Desired != *req.SetDesired {
-					log.Print("New desired attitude:", firmware.Desired)
-				}
-				firmware.Desired = *req.SetDesired
-			}
-			if req.Cutout != "" {
-				cutoutReason = req.Cutout
-				log.Print("Cutout: ", cutoutReason)
-				firmware.Desired.Altitude = 0
-			}
-			if req.Calibrate {
-				calibrate()
-			}
-			req.response <- res
-			if reallyVerbose() {
-				log.Print("Request: ", req, "Response: ", res)
+			if packet.Speed < godrone.MAX_MOTOR {
+				q.Enqueue([4]float64{
+          packet.Speed, packet.Speed, packet.Speed, packet.Speed})
+				q.Dequeue()
+				//log.Println(q.Head())
 			}
 		default:
 		}
 
-		var err error
-		if firmware.Desired.Altitude > 0 {
-			err = firmware.Control()
-			flying = true
-		} else {
-			// Something subtle to note here: When the motors are running,
-			// but then desired altitude goes to zero (for instance due to
-			// the emergency command in the UI) we end up here.
-			//
-			// We never actually send a motors=0 command. Instead we count on
-			// the failsafe behavior of the motorboard, which puts the motors to
-			// zero if it does not receive a new motor command soon enough.
-			err = firmware.Observe()
-			if flying {
-				log.Print("Motor cutoff.")
-				flying = false
+		time.Sleep(time.Millisecond * 10)
+		v := q.Head()
+		switch v := v.(type) {
+		case [4]float64:
+			if err := firmware.Motorboard.WriteSpeeds(v); err != nil {
+				log.Printf("Failed to write speeds: %s", err)
 			}
-		}
-		if err != nil {
-			log.Printf("%s", err)
+		default:
+			log.Println("ERROR")
 		}
 	}
-  */
+
+	//go rotate(queue, motorCh)
+
+	// This is the main control loop.
+	/*
+		flying := false
+		for {
+			select {
+			case req := <-reqCh:
+				var res Response
+				res.Cutout = cutoutReason
+				res.Actual = firmware.Actual
+				res.Desired = firmware.Desired
+				res.Time = time.Now()
+
+				if req.SetDesired != nil {
+					// Log changes to desired
+					if Verbose() && firmware.Desired != *req.SetDesired {
+						log.Print("New desired attitude:", firmware.Desired)
+					}
+					firmware.Desired = *req.SetDesired
+				}
+				if req.Cutout != "" {
+					cutoutReason = req.Cutout
+					log.Print("Cutout: ", cutoutReason)
+					firmware.Desired.Altitude = 0
+				}
+				if req.Calibrate {
+					calibrate()
+				}
+				req.response <- res
+				if reallyVerbose() {
+					log.Print("Request: ", req, "Response: ", res)
+				}
+			default:
+			}
+
+			var err error
+			if firmware.Desired.Altitude > 0 {
+				err = firmware.Control()
+				flying = true
+			} else {
+				// Something subtle to note here: When the motors are running,
+				// but then desired altitude goes to zero (for instance due to
+				// the emergency command in the UI) we end up here.
+				//
+				// We never actually send a motors=0 command. Instead we count on
+				// the failsafe behavior of the motorboard, which puts the motors to
+				// zero if it does not receive a new motor command soon enough.
+				err = firmware.Observe()
+				if flying {
+					log.Print("Motor cutoff.")
+					flying = false
+				}
+			}
+			if err != nil {
+				log.Printf("%s", err)
+			}
+		}
+	*/
 }
 
 type Request struct {
@@ -401,65 +393,66 @@ func lander(reqCh chan<- Request) {
 }
 
 func handleRequest(conn net.Conn,
-	  c chan [4]float64,
-	  firmware *godrone.Firmware) {
-  
-  dec := gob.NewDecoder(conn)
+	c chan *godrone.MotorPWM,
+	firmware *godrone.Firmware) {
+
+	dec := gob.NewDecoder(conn)
+	for {
+		motors := &godrone.MotorPWM{}
+		err := dec.Decode(motors)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		//log.Printf("Received : %v", motors)
+		c <- motors
+	}
+}
+
+func handleNav(f *godrone.Firmware, addr *net.TCPAddr) {
+  log.Println("Remote ", addr.String())
+  remoteAddr := &net.TCPAddr{addr.IP, 7777, ""}
+
+  conn, err := net.DialTCP("tcp", nil, remoteAddr)
+  log.Println("Dialed")
+  if err != nil {
+    log.Println(err)
+    return
+  }
+
+  encoder := gob.NewEncoder(conn)
   for {
-  	motors := &godrone.MotorPWM{}
-    err := dec.Decode(motors)
-    if err != nil {
-      log.Println(err)
-      return
-    }
-	  log.Printf("Received : %v", motors)
-	  c <- motors.Motor
+    f.Observe()
+    encoder.Encode(f.Actual)
+    //time.Sleep(time.Millisecond * 1000)
   }
 }
 
 func handleExternal(
-	c chan [4]float64,
+	c chan *godrone.MotorPWM,
 	firmware *godrone.Firmware) {
 
-	ln, err := net.Listen("tcp", ":666")
+  myAddr, err := net.ResolveTCPAddr("tcp4", ":666")
 	if err != nil {
-    log.Println("Error: ", err)
+		log.Println("Error: ", err)
 		return
 	}
+
+  ln, err := net.ListenTCP("tcp", myAddr)
+	if err != nil {
+		log.Println("Error: ", err)
+		return
+	}
+
 	log.Println("Started the external link.")
 
 	for {
-		conn, err := ln.Accept()
+		conn, err := ln.AcceptTCP()
 		if err != nil {
 			continue
 		}
 
+    go handleNav(firmware, conn.RemoteAddr().(*net.TCPAddr))
 		handleRequest(conn, c, firmware)
-	}
-}
-
-func ctrl(c chan [4]float64, firmware *godrone.Firmware, q *lane.Queue) {
-	//vals := [4]float64{0.002, 0.0, 0.0, 0.0}
-
-	for {
-		select {
-    case motori := <-c:
-        z := q.Head
-        q.Dequeue()
-        q.Enqueue(z)
-        //q.Enqueue(q.Head)
-        //q.Dequeue()
-        log.Println("\t\t", motori)
-		  default:
-		}
-
-      time.Sleep(time.Millisecond * 10)
-      v := q.Head()
-      switch v := v.(type) {
-        case [4]float64:
-		      if err := firmware.Motorboard.WriteSpeeds(v); err != nil {
-			      log.Printf("Failed to write speeds: %s", err)
-		      }
-        }
 	}
 }
